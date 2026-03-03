@@ -143,6 +143,56 @@ Creates six lab issues per module repo (120 total across all phases).
 
 **Issue format:** `Lab XX-YY: <Lab Name>` with acceptance criteria checklist, compose file reference, and test script path.
 
+#### `scripts/github/create-integration-issues.ps1`
+Creates 23 GitHub Issues for all cross-service integration milestones (8 SSO + 15 business workflow integrations).
+
+```powershell
+# All 23 integration issues
+.\scripts\github\create-integration-issues.ps1
+
+# SSO integrations only (8 issues)
+.\scripts\github\create-integration-issues.ps1 -Category sso
+
+# Business workflow integrations only (15 issues)
+.\scripts\github\create-integration-issues.ps1 -Category business
+
+# Single integration by ID
+.\scripts\github\create-integration-issues.ps1 -Id INT-09
+```
+
+**Issue format:** `Integration: Service-A <-> Service-B (description)` with overview, step-by-step implementation checklist, and acceptance criteria per integration.
+
+**Integrations covered:**
+
+| ID | Integration | Protocol | Repo |
+|----|-------------|----------|------|
+| INT-01 | FreeIPA <-> Keycloak | LDAP federation | `it-stack-keycloak` |
+| INT-02 | Nextcloud <-> Keycloak | OIDC | `it-stack-nextcloud` |
+| INT-03 | Mattermost <-> Keycloak | OIDC | `it-stack-mattermost` |
+| INT-04 | SuiteCRM <-> Keycloak | SAML 2.0 | `it-stack-suitecrm` |
+| INT-05 | Odoo <-> Keycloak | OIDC | `it-stack-odoo` |
+| INT-06 | Zammad <-> Keycloak | OIDC | `it-stack-zammad` |
+| INT-07 | GLPI <-> Keycloak | SAML 2.0 | `it-stack-glpi` |
+| INT-08 | Taiga <-> Keycloak | OIDC | `it-stack-taiga` |
+| INT-08b | Snipe-IT <-> Keycloak | SAML 2.0 | `it-stack-snipeit` |
+| INT-09 | FreePBX <-> SuiteCRM | CTI / REST API | `it-stack-freepbx` |
+| INT-10 | FreePBX <-> Zammad | AMI webhook | `it-stack-freepbx` |
+| INT-11 | FreePBX <-> FreeIPA | LDAP extension provisioning | `it-stack-freepbx` |
+| INT-12 | SuiteCRM <-> Odoo | REST API bidirectional sync | `it-stack-suitecrm` |
+| INT-13 | SuiteCRM <-> Nextcloud | CalDAV calendar sync | `it-stack-suitecrm` |
+| INT-14 | SuiteCRM <-> OpenKM | REST API document linking | `it-stack-suitecrm` |
+| INT-15 | Odoo <-> FreeIPA | LDAP employee sync | `it-stack-odoo` |
+| INT-16 | Odoo <-> Taiga | Timesheet export | `it-stack-odoo` |
+| INT-17 | Odoo <-> Snipe-IT | Procurement -> asset | `it-stack-odoo` |
+| INT-18 | Taiga <-> Mattermost | Webhook notifications | `it-stack-taiga` |
+| INT-19 | Snipe-IT <-> GLPI | Asset -> CMDB sync | `it-stack-snipeit` |
+| INT-20 | GLPI <-> Zammad | Ticket escalation | `it-stack-glpi` |
+| INT-21 | OpenKM <-> Nextcloud | Document storage bridge | `it-stack-openkm` |
+| INT-22 | Zabbix <-> Mattermost | Infrastructure alert webhooks | `it-stack-zabbix` |
+| INT-23 | Graylog <-> Zabbix | Log-based alert triggers | `it-stack-graylog` |
+
+> **Note:** Requires `integration` label — run `apply-labels.ps1` first (label added in v1.25.0).
+
 ---
 
 ### Operations Scripts
@@ -266,6 +316,9 @@ When setting up the org from scratch, run scripts in this order:
 .\scripts\github\add-phase2-issues.ps1
 .\scripts\github\add-phase3-issues.ps1
 .\scripts\github\add-phase4-issues.ps1
+
+# Step 6: Create the 23 integration milestone issues
+.\scripts\github\create-integration-issues.ps1
 ```
 
 ## License

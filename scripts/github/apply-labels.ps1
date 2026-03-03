@@ -52,6 +52,8 @@ $labels = @(
   @{ name = "business";       color = "d93f0b"; desc = "Business systems" },
   @{ name = "it-management";  color = "d93f0b"; desc = "IT and Project Management" },
   @{ name = "infrastructure"; color = "d93f0b"; desc = "Infrastructure" },
+  # Type
+  @{ name = "integration"; color = "5319e7"; desc = "Cross-service integration milestone" },
   # Priority
   @{ name = "priority-high"; color = "b60205"; desc = "High priority" },
   @{ name = "priority-med";  color = "fbca04"; desc = "Medium priority" },
