@@ -105,8 +105,9 @@ if (-not $Profile) {
 }
 
 # --- Cross-platform SSH key default path --------------------------------------
+# $IsWindows is PS6+ only; use $env:OS which works on all versions
 if (-not $SshPublicKeyPath) {
-    $SshPublicKeyPath = if ($IsWindows) {
+    $SshPublicKeyPath = if ($env:OS -eq 'Windows_NT') {
         Join-Path $HOME '.ssh' 'id_rsa.pub'
     } else {
         "$HOME/.ssh/id_rsa.pub"
