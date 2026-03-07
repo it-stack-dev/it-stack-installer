@@ -36,8 +36,12 @@
     SSH admin username on all VMs (default: itstack)
 
 .PARAMETER SshPublicKeyPath
-    Path to your SSH public key file (default: ~/.ssh/id_rsa.pub).
-    Auto-generates a key if none exists.
+    Path to your SSH public key file (default: ~/.ssh/id_rsa.pub on Linux/macOS,
+    ~\.ssh\id_rsa.pub on Windows). Auto-generates a key if none exists.
+
+.PARAMETER Mode
+    Legacy alias kept for backward compatibility (Phase1=SingleVM, Lab06HA=MultiVM).
+    Prefer -Profile Phase1|FullStack|Lab06HA.
 
 .PARAMETER AutoShutdownTime
     Daily auto-shutdown in HHmm 24hr UTC (default: 2200).
@@ -65,20 +69,49 @@
 
 [CmdletBinding()]
 param(
-    [Parameter(Mandatory)]
-    [ValidateSet("Phase1","FullStack","Lab06HA")]
-    [string]$Profile,
+    [Parameter(Mandatory=$false)]
+    [ValidateSet("Phase1","FullStack","Lab06HA","")]
+    [string]$Profile = "",
+
+    # Legacy -Mode alias (SingleVM → Phase1, MultiVM → Lab06HA)
+    [Parameter(Mandatory=$false)]
+    [ValidateSet("SingleVM","MultiVM","")]
+    [string]$Mode = "",
 
     [string]$ResourceGroup    = "",
     [string]$Location         = "eastus",
     [string]$AdminUser        = "itstack",
-    [string]$SshPublicKeyPath = "$HOME\.ssh\id_rsa.pub",
+    [string]$SshPublicKeyPath = "",
     [string]$AutoShutdownTime = "2200",
     [switch]$DryRun
 )
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = "Stop"
+
+# ─── Backward-compat: map -Mode to -Profile ───────────────────────────────────
+if ($Mode -and -not $Profile) {
+    Write-Warning "-Mode is deprecated. Use -Profile Phase1|FullStack|Lab06HA instead."
+    $Profile = if ($Mode -eq "SingleVM") { "Phase1" } else { "Lab06HA" }
+    Write-Warning "Mapped -Mode $Mode  →  -Profile $Profile"
+}
+if (-not $Profile) {
+    Write-Host "Usage: .\deploy-azure-lab.ps1 -Profile <Phase1|FullStack|Lab06HA>" -ForegroundColor Yellow
+    Write-Host ""
+    Write-Host "  -Profile Phase1    Standard_D8s_v4 single VM  ~`$3/day   Labs 01-03" -ForegroundColor Cyan
+    Write-Host "  -Profile FullStack  Standard_E16s_v4 single VM ~`$8/day   Labs 01-05" -ForegroundColor Cyan
+    Write-Host "  -Profile Lab06HA    8-VM cluster               ~`$16/day  Labs 01-06" -ForegroundColor Cyan
+    throw "Missing required parameter: -Profile"
+}
+
+# ─── Cross-platform SSH key default path ──────────────────────────────────────
+if (-not $SshPublicKeyPath) {
+    $SshPublicKeyPath = if ($IsWindows) {
+        Join-Path $HOME '.ssh' 'id_rsa.pub'
+    } else {
+        "$HOME/.ssh/id_rsa.pub"
+    }
+}
 
 # ─── Colour helpers ───────────────────────────────────────────────────────────
 function Write-Step { param($m) Write-Host "`n▶ $m" -ForegroundColor Cyan }
@@ -161,13 +194,27 @@ Write-OK "Subscription: $($sub.name) [$($sub.id)]"
 if (-not (Test-Path $SshPublicKeyPath)) {
     Write-Warn "SSH key not found at $SshPublicKeyPath — generating..."
     if (-not $DryRun) {
-        $keyDir = Split-Path $SshPublicKeyPath
-        if (-not (Test-Path $keyDir)) { New-Item -ItemType Directory -Path $keyDir | Out-Null }
-        $keyBase = $SshPublicKeyPath -replace "\.pub$",""
-        ssh-keygen -t rsa -b 4096 -f $keyBase -N '""'
+        # Build key path using the platform path separator
+        $keyBase = $SshPublicKeyPath -replace [regex]::Escape('.pub'), ''
+        $keyDir  = Split-Path $keyBase -Parent
+        if ($keyDir -and (-not (Test-Path $keyDir))) {
+            New-Item -ItemType Directory -Path $keyDir -Force | Out-Null
+        }
+        try {
+            # Empty passphrase: use bare "" (not '""' which passes literal double-quotes)
+            ssh-keygen -t rsa -b 4096 -f $keyBase -N ""
+        } catch {
+            Write-Warn "ssh-keygen failed: $_"
+            Write-Warn "You can generate a key manually: ssh-keygen -t rsa -b 4096 -f ~/.ssh/id_rsa"
+        }
     }
 }
-$SshPublicKey = if (Test-Path $SshPublicKeyPath) { Get-Content $SshPublicKeyPath -Raw } else { "DRY-RUN-KEY" }
+$SshPublicKey = if (Test-Path $SshPublicKeyPath) {
+    Get-Content $SshPublicKeyPath -Raw
+} else {
+    if (-not $DryRun) { Write-Warn "SSH public key not found — deploy will fail. Generate one first." }
+    "DRY-RUN-KEY"
+}
 Write-OK "SSH key: $SshPublicKeyPath"
 
 # ─── Print plan ───────────────────────────────────────────────────────────────
