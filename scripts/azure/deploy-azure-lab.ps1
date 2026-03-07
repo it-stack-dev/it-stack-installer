@@ -3,56 +3,75 @@
     Deploys the IT-Stack lab environment on Azure.
 
 .DESCRIPTION
-    Supports two modes:
-      -Mode SingleVM  : One large VM running all services via Docker Compose (Option B).
-                        Cheapest. Good for Labs 01-05. (~$3-8/day depending on size)
-      -Mode MultiVM   : Full 8-VM layout mirroring production (Option A).
-                        Full fidelity. Good for Lab 06. (~$16/day all running)
+    Three lab profiles matching the recommended deployment progression:
 
-.PARAMETER Mode
-    SingleVM or MultiVM (default: SingleVM)
+      -Profile Phase1
+          Standard_D8s_v4  (8 vCPU / 32 GB RAM)    ~$3/day @ 8hrs
+          Single VM · Labs 01-03 · Phase 1 modules (FreeIPA, Keycloak, PostgreSQL, Redis, Traefik)
+          Ideal for: first-time setup, Azure Student credit, learning Phase 1
 
-.PARAMETER VMSize
-    Azure VM size override. SingleVM default: Standard_D8s_v4. MultiVM uses per-server defaults.
+      -Profile FullStack
+          Standard_E16s_v4 (16 vCPU / 128 GB RAM)   ~$8/day @ 8hrs
+          Single VM · All 20 modules · Labs 01-05
+          Ideal for: running all phases end-to-end, integration testing
+
+      -Profile Lab06HA
+          8-VM cluster mirroring production layout    ~$16/day @ 8hrs
+          Labs 01-06 · Full HA, Ansible, production playbooks
+          Ideal for: Lab 06 production deployment, Ansible testing, DR drills
+
+    The script is idempotent — safe to re-run. Existing resources are skipped.
+
+.PARAMETER Profile
+    Phase1 | FullStack | Lab06HA
 
 .PARAMETER ResourceGroup
-    Azure resource group name (default: rg-it-stack-lab)
+    Azure resource group name.
+    Defaults: rg-it-stack-phase1 | rg-it-stack-fullstack | rg-it-stack-lab06
 
 .PARAMETER Location
     Azure region (default: eastus — cheapest for student accounts)
 
 .PARAMETER AdminUser
-    SSH admin username (default: itstack)
+    SSH admin username on all VMs (default: itstack)
 
 .PARAMETER SshPublicKeyPath
-    Path to SSH public key file (default: ~/.ssh/id_rsa.pub)
+    Path to your SSH public key file (default: ~/.ssh/id_rsa.pub).
+    Auto-generates a key if none exists.
 
 .PARAMETER AutoShutdownTime
-    Daily auto-shutdown time in HHmm 24hr UTC (default: 2200 = 10pm UTC)
+    Daily auto-shutdown in HHmm 24hr UTC (default: 2200).
+    Set to empty string "" to disable auto-shutdown.
 
 .PARAMETER DryRun
-    Print what would be created without actually creating it.
+    Print the full deployment plan without creating any Azure resources.
 
 .EXAMPLE
-    # Deploy single VM for student labs
-    .\deploy-azure-lab.ps1 -Mode SingleVM
+    # Phase 1 — cheapest, good for learning (Azure Student recommended start)
+    .\deploy-azure-lab.ps1 -Profile Phase1
 
-    # Deploy full 8-VM production lab
-    .\deploy-azure-lab.ps1 -Mode MultiVM
+    # Full stack test — all 20 modules on one big VM
+    .\deploy-azure-lab.ps1 -Profile FullStack
 
-    # Custom size + dry run
-    .\deploy-azure-lab.ps1 -Mode SingleVM -VMSize Standard_E16s_v4 -DryRun
+    # Lab 06 HA — full 8-VM production replica
+    .\deploy-azure-lab.ps1 -Profile Lab06HA
+
+    # Preview what would be created
+    .\deploy-azure-lab.ps1 -Profile FullStack -DryRun
+
+    # Custom resource group and region
+    .\deploy-azure-lab.ps1 -Profile Phase1 -ResourceGroup my-rg -Location westus2
 #>
 
 [CmdletBinding()]
 param(
-    [ValidateSet("SingleVM","MultiVM")]
-    [string]$Mode = "SingleVM",
+    [Parameter(Mandatory)]
+    [ValidateSet("Phase1","FullStack","Lab06HA")]
+    [string]$Profile,
 
-    [string]$VMSize = "",
-    [string]$ResourceGroup = "rg-it-stack-lab",
-    [string]$Location = "eastus",
-    [string]$AdminUser = "itstack",
+    [string]$ResourceGroup    = "",
+    [string]$Location         = "eastus",
+    [string]$AdminUser        = "itstack",
     [string]$SshPublicKeyPath = "$HOME\.ssh\id_rsa.pub",
     [string]$AutoShutdownTime = "2200",
     [switch]$DryRun
@@ -62,143 +81,182 @@ Set-StrictMode -Version Latest
 $ErrorActionPreference = "Stop"
 
 # ─── Colour helpers ───────────────────────────────────────────────────────────
-function Write-Step  { param($m) Write-Host "`n▶ $m" -ForegroundColor Cyan }
-function Write-OK    { param($m) Write-Host "  ✓ $m" -ForegroundColor Green }
-function Write-Warn  { param($m) Write-Host "  ⚠ $m" -ForegroundColor Yellow }
-function Write-Dry   { param($m) Write-Host "  [DRY-RUN] $m" -ForegroundColor Magenta }
+function Write-Step { param($m) Write-Host "`n▶ $m" -ForegroundColor Cyan }
+function Write-OK   { param($m) Write-Host "  ✓ $m" -ForegroundColor Green }
+function Write-Warn { param($m) Write-Host "  ⚠ $m" -ForegroundColor Yellow }
+function Write-Info { param($m) Write-Host "  · $m" -ForegroundColor Gray }
+function Write-Dry  { param($m) Write-Host "  [DRY-RUN] $m" -ForegroundColor Magenta }
+
+# ─── Profile definitions ──────────────────────────────────────────────────────
+$Profiles = @{
+    Phase1 = @{
+        Description   = "Phase 1 — Foundation (Labs 01-03, Phase 1 modules)"
+        Mode          = "SingleVM"
+        VMSize        = "Standard_D8s_v4"
+        OsDiskGB      = 64
+        DailyEst      = '~$3/day @ 8hrs'
+        RGDefault     = "rg-it-stack-phase1"
+        Modules       = @("freeipa","keycloak","postgresql","redis","traefik")
+        LabsSupported = "Labs 01-03"
+    }
+    FullStack = @{
+        Description   = "Full Stack — All 20 modules (Labs 01-05)"
+        Mode          = "SingleVM"
+        VMSize        = "Standard_E16s_v4"
+        OsDiskGB      = 128
+        DailyEst      = '~$8/day @ 8hrs'
+        RGDefault     = "rg-it-stack-fullstack"
+        Modules       = @("all")
+        LabsSupported = "Labs 01-05"
+    }
+    Lab06HA = @{
+        Description   = "Lab 06 — Production HA (8-VM cluster, all labs)"
+        Mode          = "MultiVM"
+        VMSize        = ""
+        OsDiskGB      = 64
+        DailyEst      = '~$16/day @ 8hrs'
+        RGDefault     = "rg-it-stack-lab06"
+        Modules       = @("all")
+        LabsSupported = "Labs 01-06"
+    }
+}
+
+$P = $Profiles[$Profile]
+if (-not $ResourceGroup) { $ResourceGroup = $P.RGDefault }
+
+# ─── 8-VM cluster layout (Lab06HA) ────────────────────────────────────────────
+$MultiVMLayout = @(
+    @{ Name="lab-id1";    IP="10.0.50.11"; Size="Standard_D4s_v4";  DiskGB=64;  Role="FreeIPA, Keycloak";                PublicIP=$false }
+    @{ Name="lab-db1";    IP="10.0.50.12"; Size="Standard_E8s_v4";  DiskGB=100; Role="PostgreSQL, Redis, Elasticsearch"; PublicIP=$false }
+    @{ Name="lab-app1";   IP="10.0.50.13"; Size="Standard_D8s_v4";  DiskGB=128; Role="Nextcloud, Mattermost, Jitsi";     PublicIP=$false }
+    @{ Name="lab-comm1";  IP="10.0.50.14"; Size="Standard_D4s_v4";  DiskGB=64;  Role="iRedMail, Zammad, Zabbix";         PublicIP=$false }
+    @{ Name="lab-proxy1"; IP="10.0.50.15"; Size="Standard_D2s_v4";  DiskGB=64;  Role="Traefik, Graylog";                 PublicIP=$true  }
+    @{ Name="lab-pbx1";   IP="10.0.50.16"; Size="Standard_D2s_v4";  DiskGB=64;  Role="FreePBX";                          PublicIP=$false }
+    @{ Name="lab-biz1";   IP="10.0.50.17"; Size="Standard_D8s_v4";  DiskGB=100; Role="SuiteCRM, Odoo, OpenKM";           PublicIP=$false }
+    @{ Name="lab-mgmt1";  IP="10.0.50.18"; Size="Standard_D4s_v4";  DiskGB=64;  Role="Taiga, Snipe-IT, GLPI";            PublicIP=$false }
+)
+
+$VNetName   = "vnet-it-stack-lab"
+$SubnetName = "snet-servers"
+$NsgName    = "nsg-it-stack-lab"
+$VNetPrefix = "10.0.50.0/24"
+$DnsZone    = "lab.it-stack.local"
 
 # ─── Pre-flight checks ────────────────────────────────────────────────────────
 Write-Step "Pre-flight checks"
 
 if (-not (Get-Command az -ErrorAction SilentlyContinue)) {
-    throw "Azure CLI (az) not found. Install from https://aka.ms/installazurecliwindows"
+    throw "Azure CLI not found. Install: https://aka.ms/installazurecliwindows"
 }
-Write-OK "Azure CLI found: $(az version --query '\"azure-cli\"' -o tsv 2>$null)"
+Write-OK "Azure CLI: $(az version --query '\"azure-cli\"' -o tsv 2>$null)"
 
 $loginCheck = az account show --query "id" -o tsv 2>$null
 if (-not $loginCheck) {
-    Write-Warn "Not logged in. Running 'az login'..."
+    Write-Warn "Not logged in — running az login..."
     az login
 }
-$subscription = az account show --query "{name:name, id:id, state:state}" -o json | ConvertFrom-Json
-Write-OK "Subscription: $($subscription.name) [$($subscription.id)]"
+$sub = az account show --query "{name:name,id:id}" -o json | ConvertFrom-Json
+Write-OK "Subscription: $($sub.name) [$($sub.id)]"
 
 if (-not (Test-Path $SshPublicKeyPath)) {
-    Write-Warn "SSH public key not found at $SshPublicKeyPath"
-    Write-Warn "Generating a new SSH key pair..."
+    Write-Warn "SSH key not found at $SshPublicKeyPath — generating..."
     if (-not $DryRun) {
-        ssh-keygen -t rsa -b 4096 -f "$HOME\.ssh\id_rsa" -N '""'
+        $keyDir = Split-Path $SshPublicKeyPath
+        if (-not (Test-Path $keyDir)) { New-Item -ItemType Directory -Path $keyDir | Out-Null }
+        $keyBase = $SshPublicKeyPath -replace "\.pub$",""
+        ssh-keygen -t rsa -b 4096 -f $keyBase -N '""'
     }
 }
 $SshPublicKey = if (Test-Path $SshPublicKeyPath) { Get-Content $SshPublicKeyPath -Raw } else { "DRY-RUN-KEY" }
 Write-OK "SSH key: $SshPublicKeyPath"
 
-# ─── Configuration ────────────────────────────────────────────────────────────
-$VNetName    = "vnet-it-stack-lab"
-$SubnetName  = "snet-servers"
-$NsgName     = "nsg-it-stack-lab"
-$VNetPrefix  = "10.0.50.0/24"
-$SubnetPrefix = "10.0.50.0/24"
-
-# SingleVM defaults
-$SingleVMDefaults = @{
-    Standard_D4s_v4  = "4 vCPU / 16 GB  — ~\$0.19/hr — minimal (Lab 01-02 only)"
-    Standard_D8s_v4  = "8 vCPU / 32 GB  — ~\$0.38/hr — recommended (Labs 01-05)"
-    Standard_E16s_v4 = "16 vCPU / 128 GB — ~\$1.01/hr — full stack (all labs)"
-}
-
-# MultiVM layout
-$MultiVMLayout = @(
-    @{ Name="lab-id1";    IP="10.0.50.11"; Size="Standard_D4s_v4";  Role="FreeIPA, Keycloak" }
-    @{ Name="lab-db1";    IP="10.0.50.12"; Size="Standard_E8s_v4";  Role="PostgreSQL, Redis, Elasticsearch" }
-    @{ Name="lab-app1";   IP="10.0.50.13"; Size="Standard_D8s_v4";  Role="Nextcloud, Mattermost, Jitsi" }
-    @{ Name="lab-comm1";  IP="10.0.50.14"; Size="Standard_D4s_v4";  Role="iRedMail, Zammad, Zabbix" }
-    @{ Name="lab-proxy1"; IP="10.0.50.15"; Size="Standard_D2s_v4";  Role="Traefik, Graylog" }
-    @{ Name="lab-pbx1";   IP="10.0.50.16"; Size="Standard_D2s_v4";  Role="FreePBX" }
-    @{ Name="lab-biz1";   IP="10.0.50.17"; Size="Standard_D8s_v4";  Role="SuiteCRM, Odoo, OpenKM" }
-    @{ Name="lab-mgmt1";  IP="10.0.50.18"; Size="Standard_D4s_v4";  Role="Taiga, Snipe-IT, GLPI" }
-)
-
-if ($Mode -eq "SingleVM" -and -not $VMSize) { $VMSize = "Standard_D8s_v4" }
-
 # ─── Print plan ───────────────────────────────────────────────────────────────
 Write-Step "Deployment plan"
-Write-Host "  Mode          : $Mode"
+Write-Host ""
+Write-Host "  Profile       : $Profile" -ForegroundColor White
+Write-Host "  Description   : $($P.Description)"
+Write-Host "  Cost estimate : $($P.DailyEst)"
+Write-Host "  Labs covered  : $($P.LabsSupported)"
 Write-Host "  Resource Group: $ResourceGroup"
 Write-Host "  Location      : $Location"
-Write-Host "  VNet          : $VNetName ($VNetPrefix)"
 Write-Host "  Admin user    : $AdminUser"
-Write-Host "  Auto-shutdown : $AutoShutdownTime UTC"
-if ($Mode -eq "SingleVM") {
-    Write-Host "  VM Size       : $VMSize  ($($SingleVMDefaults[$VMSize]))"
+Write-Host "  Auto-shutdown : $(if ($AutoShutdownTime) { $AutoShutdownTime + ' UTC' } else { 'disabled' })"
+Write-Host ""
+
+if ($P.Mode -eq "SingleVM") {
+    Write-Host "  VM layout:" -ForegroundColor White
+    Write-Host "    lab-single    10.0.50.10   $($P.VMSize.PadRight(20))   All services via Docker Compose"
+    Write-Host "    OS disk:      $($P.OsDiskGB) GB"
 } else {
-    Write-Host "  VMs (8):"
+    Write-Host "  VM layout (8-server cluster):" -ForegroundColor White
     foreach ($vm in $MultiVMLayout) {
-        $sz = if ($VMSize) { $VMSize } else { $vm.Size }
-        Write-Host "    $($vm.Name.PadRight(12)) $($vm.IP)   $($sz.PadRight(20))  — $($vm.Role)"
+        $pip = if ($vm.PublicIP) { " ← public IP" } else { "" }
+        Write-Host "    $($vm.Name.PadRight(12)) $($vm.IP)   $($vm.Size.PadRight(20))  $($vm.DiskGB) GB   $($vm.Role)$pip"
     }
 }
-if ($DryRun) { Write-Warn "DRY-RUN — no resources will be created"; return }
+Write-Host ""
+
+if ($DryRun) {
+    Write-Dry "No resources will be created (dry run). Remove -DryRun to deploy."
+    return
+}
 
 # ─── Resource Group ───────────────────────────────────────────────────────────
-Write-Step "Resource group"
+Write-Step "Resource group: $ResourceGroup"
 $rgExists = az group exists --name $ResourceGroup | ConvertFrom-Json
 if (-not $rgExists) {
     az group create --name $ResourceGroup --location $Location --output none
-    Write-OK "Created: $ResourceGroup"
+    Write-OK "Created"
 } else {
-    Write-OK "Already exists: $ResourceGroup"
+    Write-OK "Already exists"
 }
 
 # ─── NSG ──────────────────────────────────────────────────────────────────────
-Write-Step "Network security group"
-$nsgExists = az network nsg show --resource-group $ResourceGroup --name $NsgName --query "name" -o tsv 2>$null
+Write-Step "Network security group: $NsgName"
+$nsgExists = az network nsg show --resource-group $ResourceGroup --name $NsgName `
+    --query "name" -o tsv 2>$null
 if (-not $nsgExists) {
-    az network nsg create --resource-group $ResourceGroup --name $NsgName --location $Location --output none
+    az network nsg create --resource-group $ResourceGroup --name $NsgName `
+        --location $Location --output none
 
-    # Allow SSH from anywhere (for lab; restrict to your IP in production)
-    az network nsg rule create --resource-group $ResourceGroup --nsg-name $NsgName `
-        --name "Allow-SSH" --priority 100 --direction Inbound --access Allow `
-        --protocol Tcp --destination-port-ranges 22 --output none
-
-    # Allow all internal VNet traffic
-    az network nsg rule create --resource-group $ResourceGroup --nsg-name $NsgName `
-        --name "Allow-VNet-Internal" --priority 200 --direction Inbound --access Allow `
-        --protocol "*" --source-address-prefixes VirtualNetwork `
-        --destination-address-prefixes VirtualNetwork --destination-port-ranges "*" --output none
-
-    # Allow web ports for lab access (HTTP/HTTPS)
-    az network nsg rule create --resource-group $ResourceGroup --nsg-name $NsgName `
-        --name "Allow-Web" --priority 300 --direction Inbound --access Allow `
-        --protocol Tcp --destination-port-ranges 80 443 8080 8443 8065 9000 3000 --output none
-
-    Write-OK "Created NSG with SSH + web + VNet rules"
+    $nsgRules = @(
+        @{ Name="Allow-SSH";           Priority=100; Ports=@("22");                                              Desc="SSH access" }
+        @{ Name="Allow-VNet-Internal"; Priority=200; Ports=@("*"); Source="VirtualNetwork";                     Desc="VNet internal traffic" }
+        @{ Name="Allow-HTTP-HTTPS";    Priority=300; Ports=@("80","443");                                        Desc="Web traffic" }
+        @{ Name="Allow-Lab-Ports";     Priority=400; Ports=@("8080","8443","8065","8069","9000","3000","5601");  Desc="Lab service ports" }
+        @{ Name="Allow-Mail";          Priority=500; Ports=@("25","143","587","993");                            Desc="Email (iRedMail)" }
+        @{ Name="Allow-VoIP";          Priority=600; Ports=@("5060","5061");                                     Desc="SIP/VoIP (FreePBX)" }
+    )
+    foreach ($r in $nsgRules) {
+        $src = if ($r.Source) { $r.Source } else { "*" }
+        az network nsg rule create `
+            --resource-group $ResourceGroup --nsg-name $NsgName `
+            --name $r.Name --priority $r.Priority --direction Inbound --access Allow `
+            --protocol Tcp --source-address-prefixes $src `
+            --destination-address-prefixes "*" `
+            --destination-port-ranges $r.Ports `
+            --output none
+    }
+    Write-OK "NSG created with SSH + web + mail + VoIP + VNet rules"
 } else {
-    Write-OK "NSG already exists: $NsgName"
+    Write-OK "Already exists"
 }
 
 # ─── VNet + Subnet ────────────────────────────────────────────────────────────
-Write-Step "Virtual network"
-$vnetExists = az network vnet show --resource-group $ResourceGroup --name $VNetName --query "name" -o tsv 2>$null
+Write-Step "Virtual network: $VNetName ($VNetPrefix)"
+$vnetExists = az network vnet show --resource-group $ResourceGroup --name $VNetName `
+    --query "name" -o tsv 2>$null
 if (-not $vnetExists) {
     az network vnet create `
-        --resource-group $ResourceGroup `
-        --name $VNetName `
-        --location $Location `
-        --address-prefix $VNetPrefix `
-        --subnet-name $SubnetName `
-        --subnet-prefix $SubnetPrefix `
+        --resource-group $ResourceGroup --name $VNetName --location $Location `
+        --address-prefix $VNetPrefix --subnet-name $SubnetName --subnet-prefix $VNetPrefix `
         --output none
-    # Attach NSG to subnet
     az network vnet subnet update `
-        --resource-group $ResourceGroup `
-        --vnet-name $VNetName `
-        --name $SubnetName `
-        --network-security-group $NsgName `
-        --output none
-    Write-OK "Created VNet: $VNetName ($VNetPrefix) with subnet: $SubnetName"
+        --resource-group $ResourceGroup --vnet-name $VNetName --name $SubnetName `
+        --network-security-group $NsgName --output none
+    Write-OK "Created"
 } else {
-    Write-OK "VNet already exists: $VNetName"
+    Write-OK "Already exists"
 }
 
 # ─── VM creation function ─────────────────────────────────────────────────────
@@ -207,209 +265,249 @@ function New-LabVM {
         [string]$VmName,
         [string]$PrivateIp,
         [string]$Size,
-        [string]$Role
+        [int]$DiskGB,
+        [string]$Role,
+        [bool]$AddPublicIp = $false
     )
 
-    Write-Host "  Creating $VmName ($Size) [$Role]..." -NoNewline
-
-    $exists = az vm show --resource-group $ResourceGroup --name $VmName --query "name" -o tsv 2>$null
+    $exists = az vm show --resource-group $ResourceGroup --name $VmName `
+        --query "name" -o tsv 2>$null
     if ($exists) {
-        Write-Host " already exists, skipping." -ForegroundColor Yellow
+        Write-OK "$VmName — already exists, skipping"
         return
     }
 
-    # Create NIC with static private IP
+    Write-Host "  · Creating $VmName ($Size / ${DiskGB}GB) [$Role]..." -NoNewline -ForegroundColor Gray
+
+    # NIC with static private IP
     $nicName = "nic-$VmName"
     az network nic create `
-        --resource-group $ResourceGroup `
-        --name $nicName `
-        --vnet-name $VNetName `
-        --subnet $SubnetName `
+        --resource-group $ResourceGroup --name $nicName `
+        --vnet-name $VNetName --subnet $SubnetName `
         --private-ip-address $PrivateIp `
         --network-security-group $NsgName `
         --output none
 
-    # Create VM
+    # VM (no-wait for parallel provisioning)
     az vm create `
-        --resource-group $ResourceGroup `
-        --name $VmName `
-        --location $Location `
-        --size $Size `
-        --nics $nicName `
+        --resource-group $ResourceGroup --name $VmName --location $Location `
+        --size $Size --nics $nicName `
         --image Ubuntu2404 `
         --admin-username $AdminUser `
         --ssh-key-values $SshPublicKey `
-        --os-disk-size-gb 64 `
+        --os-disk-size-gb $DiskGB `
         --storage-sku Premium_LRS `
-        --output none
+        --no-wait --output none
+
+    # Wait for provisioning to finish
+    az vm wait --resource-group $ResourceGroup --name $VmName --created --output none
 
     # Auto-shutdown
-    az vm auto-shutdown `
-        --resource-group $ResourceGroup `
-        --name $VmName `
-        --time $AutoShutdownTime `
-        --output none
+    if ($AutoShutdownTime) {
+        az vm auto-shutdown `
+            --resource-group $ResourceGroup --name $VmName `
+            --time $AutoShutdownTime --output none
+    }
 
-    # Install Docker + common tools via cloud-init custom script extension
+    # Bootstrap: Docker, Docker Compose v2, Ansible, IT-Stack repos, hostname
     $initScript = @"
 #!/bin/bash
 set -e
 export DEBIAN_FRONTEND=noninteractive
 apt-get update -qq
-apt-get install -y -qq curl wget git vim htop net-tools dnsutils
-# Install Docker
+apt-get install -y -qq curl wget git vim htop net-tools dnsutils jq python3-pip ansible-core
+# Docker
 curl -fsSL https://get.docker.com | sh
 usermod -aG docker $AdminUser
-systemctl enable docker
-systemctl start docker
-# Install Docker Compose v2
+systemctl enable --now docker
+# Docker Compose v2
 mkdir -p /usr/local/lib/docker/cli-plugins
-curl -SL https://github.com/docker/compose/releases/latest/download/docker-compose-linux-x86_64 \
+curl -fsSL https://github.com/docker/compose/releases/latest/download/docker-compose-linux-x86_64 \
      -o /usr/local/lib/docker/cli-plugins/docker-compose
 chmod +x /usr/local/lib/docker/cli-plugins/docker-compose
-# Set hostname
+# Ansible collections
+ansible-galaxy collection install community.general community.crypto ansible.posix 2>/dev/null || true
+# Clone IT-Stack repos
+cd /home/$AdminUser
+git clone https://github.com/it-stack-dev/it-stack-ansible.git   2>/dev/null || true
+git clone https://github.com/it-stack-dev/it-stack-installer.git 2>/dev/null || true
+chown -R ${AdminUser}:${AdminUser} /home/${AdminUser}/it-stack-*
+# Hostname
 hostnamectl set-hostname $VmName
-echo "IT-Stack lab VM $VmName ($Role) ready" > /etc/motd
+echo "" >> /etc/hosts
+echo "127.0.1.1  $VmName" >> /etc/hosts
+# MOTD
+cat > /etc/motd << 'MOTDEOF'
+╔═══════════════════════════════════════════════════════════╗
+║  IT-Stack Lab — $VmName
+║  Role : $Role
+║  Repos: ~/it-stack-ansible   ~/it-stack-installer
+║  Start: cd it-stack-ansible && make help
+╚═══════════════════════════════════════════════════════════╝
+MOTDEOF
 "@
 
-    $encodedScript = [Convert]::ToBase64String([System.Text.Encoding]::UTF8.GetBytes($initScript))
-    az vm extension set `
-        --resource-group $ResourceGroup `
-        --vm-name $VmName `
-        --name CustomScript `
-        --publisher Microsoft.Azure.Extensions `
-        --settings "{`"commandToExecute`": `"echo $encodedScript | base64 -d | bash`"}" `
+    $encoded = [Convert]::ToBase64String([System.Text.Encoding]::UTF8.GetBytes($initScript))
+    az vm run-command invoke `
+        --resource-group $ResourceGroup --name $VmName `
+        --command-id RunShellScript `
+        --scripts "echo $encoded | base64 -d | bash" `
         --output none
+
+    # Public IP
+    if ($AddPublicIp) {
+        az network public-ip create `
+            --resource-group $ResourceGroup --name "pip-$VmName" `
+            --sku Basic --allocation-method Static --output none 2>$null
+        az network nic ip-config update `
+            --resource-group $ResourceGroup --nic-name $nicName `
+            --name ipconfig1 --public-ip-address "pip-$VmName" --output none
+    }
 
     Write-Host " done." -ForegroundColor Green
 }
 
 # ─── Deploy VMs ───────────────────────────────────────────────────────────────
-if ($Mode -eq "SingleVM") {
-    Write-Step "Creating single lab VM"
-    New-LabVM -VmName "lab-single" -PrivateIp "10.0.50.10" -Size $VMSize -Role "All IT-Stack services"
+Write-Step "Provisioning VMs (Profile: $Profile)"
 
-    # Add public IP for direct access
-    Write-Host "  Creating public IP..." -NoNewline
-    az network public-ip create `
-        --resource-group $ResourceGroup `
-        --name "pip-lab-single" `
-        --sku Basic `
-        --allocation-method Static `
-        --output none
-    az network nic ip-config update `
-        --resource-group $ResourceGroup `
-        --nic-name "nic-lab-single" `
-        --name ipconfig1 `
-        --public-ip-address "pip-lab-single" `
-        --output none
-    Write-Host " done." -ForegroundColor Green
+if ($P.Mode -eq "SingleVM") {
+
+    New-LabVM -VmName "lab-single" -PrivateIp "10.0.50.10" `
+        -Size $P.VMSize -DiskGB $P.OsDiskGB `
+        -Role "All IT-Stack services" -AddPublicIp $true
 
 } else {
-    Write-Step "Creating 8-VM lab cluster"
-    foreach ($vm in $MultiVMLayout) {
-        $sz = if ($VMSize) { $VMSize } else { $vm.Size }
-        New-LabVM -VmName $vm.Name -PrivateIp $vm.IP -Size $sz -Role $vm.Role
+    # Lab06HA: deploy in dependency order
+    $deployOrder = @("lab-id1","lab-db1","lab-proxy1","lab-app1","lab-comm1","lab-pbx1","lab-biz1","lab-mgmt1")
+    foreach ($name in $deployOrder) {
+        $vm = $MultiVMLayout | Where-Object { $_.Name -eq $name } | Select-Object -First 1
+        New-LabVM -VmName $vm.Name -PrivateIp $vm.IP `
+            -Size $vm.Size -DiskGB $vm.DiskGB `
+            -Role $vm.Role -AddPublicIp $vm.PublicIP
     }
-
-    # Bastion-style jumpbox public IP on lab-proxy1 only
-    Write-Host "  Adding public IP to lab-proxy1 for external access..." -NoNewline
-    az network public-ip create `
-        --resource-group $ResourceGroup `
-        --name "pip-lab-proxy1" `
-        --sku Basic `
-        --allocation-method Static `
-        --output none
-    az network nic ip-config update `
-        --resource-group $ResourceGroup `
-        --nic-name "nic-lab-proxy1" `
-        --name ipconfig1 `
-        --public-ip-address "pip-lab-proxy1" `
-        --output none
-    Write-Host " done." -ForegroundColor Green
 }
 
 # ─── Private DNS Zone ─────────────────────────────────────────────────────────
-Write-Step "Private DNS zone (lab.it-stack.local)"
+Write-Step "Private DNS zone: $DnsZone"
 $dnsExists = az network private-dns zone show --resource-group $ResourceGroup `
-    --name "lab.it-stack.local" --query "name" -o tsv 2>$null
+    --name $DnsZone --query "name" -o tsv 2>$null
 if (-not $dnsExists) {
     az network private-dns zone create `
-        --resource-group $ResourceGroup `
-        --name "lab.it-stack.local" `
-        --output none
-
+        --resource-group $ResourceGroup --name $DnsZone --output none
     az network private-dns link vnet create `
-        --resource-group $ResourceGroup `
-        --zone-name "lab.it-stack.local" `
-        --name "dns-link-lab" `
-        --virtual-network $VNetName `
-        --registration-enabled false `
-        --output none
+        --resource-group $ResourceGroup --zone-name $DnsZone `
+        --name "dns-link-lab" --virtual-network $VNetName `
+        --registration-enabled false --output none
 
-    # Add DNS A records
-    $dnsRecords = if ($Mode -eq "MultiVM") {
+    $records = if ($P.Mode -eq "MultiVM") {
         $MultiVMLayout | ForEach-Object { @{Name=$_.Name; IP=$_.IP} }
     } else {
         @(@{Name="lab-single"; IP="10.0.50.10"})
     }
 
-    foreach ($rec in $dnsRecords) {
-        az network private-dns record-set a create `
-            --resource-group $ResourceGroup `
-            --zone-name "lab.it-stack.local" `
-            --name $rec.Name --output none
-        az network private-dns record-set a add-record `
-            --resource-group $ResourceGroup `
-            --zone-name "lab.it-stack.local" `
-            --record-set-name $rec.Name `
-            --ipv4-address $rec.IP --output none
+    if ($P.Mode -eq "MultiVM") {
+        # Service-name aliases for Traefik host routing inside the VNet
+        $records += @(
+            @{Name="ipa";      IP="10.0.50.11"}
+            @{Name="cloud";    IP="10.0.50.13"}
+            @{Name="chat";     IP="10.0.50.13"}
+            @{Name="meet";     IP="10.0.50.13"}
+            @{Name="mail";     IP="10.0.50.14"}
+            @{Name="desk";     IP="10.0.50.14"}
+            @{Name="proxy";    IP="10.0.50.15"}
+            @{Name="crm";      IP="10.0.50.17"}
+            @{Name="erp";      IP="10.0.50.17"}
+            @{Name="dms";      IP="10.0.50.17"}
+            @{Name="projects"; IP="10.0.50.18"}
+            @{Name="assets";   IP="10.0.50.18"}
+            @{Name="itsm";     IP="10.0.50.18"}
+        )
     }
-    Write-OK "DNS zone created with $(($dnsRecords).Count) A records"
+
+    foreach ($rec in $records) {
+        az network private-dns record-set a add-record `
+            --resource-group $ResourceGroup --zone-name $DnsZone `
+            --record-set-name $rec.Name --ipv4-address $rec.IP `
+            --output none 2>$null
+    }
+    Write-OK "DNS zone created with $($records.Count) A records"
 } else {
-    Write-OK "DNS zone already exists"
+    Write-OK "Already exists"
 }
+
+# ─── Retrieve public IPs ──────────────────────────────────────────────────────
+$pipName  = if ($P.Mode -eq "SingleVM") { "pip-lab-single" }  else { "pip-lab-proxy1" }
+$entryVM  = if ($P.Mode -eq "SingleVM") { "lab-single" }      else { "lab-proxy1" }
+$PublicIP = az network public-ip show --resource-group $ResourceGroup `
+    --name $pipName --query "ipAddress" -o tsv 2>$null
 
 # ─── Output summary ───────────────────────────────────────────────────────────
-Write-Step "Deployment complete"
+$bar = "═" * 66
+Write-Host ""
+Write-Host "╔$bar╗" -ForegroundColor Green
+Write-Host "║  IT-Stack Lab — Profile: $($Profile.PadRight(42))║" -ForegroundColor Green
+Write-Host "╠$bar╣" -ForegroundColor Green
+Write-Host "║  Public IP    : $($PublicIP.PadRight(51))║" -ForegroundColor Green
+Write-Host "║  SSH access   : ssh $($AdminUser)@$($PublicIP.PadRight(47))║" -ForegroundColor Green
+Write-Host "║  Cost est.    : $($P.DailyEst.PadRight(51))║" -ForegroundColor Green
+Write-Host "║  Labs covered : $($P.LabsSupported.PadRight(51))║" -ForegroundColor Green
+if ($AutoShutdownTime) {
+Write-Host "║  Auto-shutdown: $($AutoShutdownTime) UTC daily$(' ' * 43)║" -ForegroundColor Green
+}
+Write-Host "╠$bar╣" -ForegroundColor Green
 
-if ($Mode -eq "SingleVM") {
-    $pip = az network public-ip show --resource-group $ResourceGroup `
-        --name "pip-lab-single" --query "ipAddress" -o tsv 2>$null
-    Write-Host ""
-    Write-Host "  ┌─────────────────────────────────────────────────────┐" -ForegroundColor Cyan
-    Write-Host "  │  IT-Stack Lab — Single VM                           │" -ForegroundColor Cyan
-    Write-Host "  │                                                     │" -ForegroundColor Cyan
-    Write-Host "  │  Public IP : $($pip.PadRight(38))│" -ForegroundColor Cyan
-    Write-Host "  │  SSH       : ssh $AdminUser@$pip          │" -ForegroundColor Cyan
-    Write-Host "  │  Size      : $($VMSize.PadRight(38))│" -ForegroundColor Cyan
-    Write-Host "  │  Shutdown  : $AutoShutdownTime UTC daily (auto)                  │" -ForegroundColor Cyan
-    Write-Host "  └─────────────────────────────────────────────────────┘" -ForegroundColor Cyan
-} else {
-    $pip = az network public-ip show --resource-group $ResourceGroup `
-        --name "pip-lab-proxy1" --query "ipAddress" -o tsv 2>$null
-    Write-Host ""
-    Write-Host "  ┌─────────────────────────────────────────────────────┐" -ForegroundColor Cyan
-    Write-Host "  │  IT-Stack Lab — 8-VM Cluster                        │" -ForegroundColor Cyan
-    Write-Host "  │                                                     │" -ForegroundColor Cyan
-    Write-Host "  │  Entry point : ssh $AdminUser@$pip        │" -ForegroundColor Cyan
-    Write-Host "  │  (lab-proxy1 is the only VM with a public IP)       │" -ForegroundColor Cyan
-    Write-Host "  │  SSH to others: ssh -J $AdminUser@$pip $AdminUser@10.0.50.11   │" -ForegroundColor Cyan
-    Write-Host "  │                                                     │" -ForegroundColor Cyan
+if ($P.Mode -eq "MultiVM") {
+    Write-Host "║  8-VM Cluster$(' ' * 53)║" -ForegroundColor Green
     foreach ($vm in $MultiVMLayout) {
-        Write-Host "  │  $($vm.Name.PadRight(12)) $($vm.IP)  $($vm.Role.PadRight(26))│" -ForegroundColor Cyan
+        $pip = if ($vm.PublicIP) { " ← entry point" } else { "" }
+        Write-Host "║    $($vm.Name.PadRight(12)) $($vm.IP)  $($vm.Role.PadRight(32))$pip  ║" -ForegroundColor Green
     }
-    Write-Host "  └─────────────────────────────────────────────────────┘" -ForegroundColor Cyan
+    Write-Host "╠$bar╣" -ForegroundColor Green
+    Write-Host "║  Jump to other servers:$(' ' * 43)║" -ForegroundColor Green
+    Write-Host "║    ssh -J $($AdminUser)@$PublicIP $($AdminUser)@10.0.50.11   (lab-id1)$(' ' * 10)║" -ForegroundColor Green
+    Write-Host "║    ssh -J $($AdminUser)@$PublicIP $($AdminUser)@10.0.50.12   (lab-db1)$(' ' * 10)║" -ForegroundColor Green
+    Write-Host "╠$bar╣" -ForegroundColor Green
 }
 
-Write-Host ""
-Write-Host "  Next steps:" -ForegroundColor White
-Write-Host "  1. Clone the Ansible repo onto the control machine:" -ForegroundColor Gray
-Write-Host "     git clone https://github.com/it-stack-dev/it-stack-ansible.git" -ForegroundColor Gray
-Write-Host "  2. Update inventory/hosts.ini with the IP(s) above" -ForegroundColor Gray
-Write-Host "  3. Run: make deploy-phase1" -ForegroundColor Gray
-Write-Host ""
-Write-Host "  Cost control:" -ForegroundColor White
-Write-Host "  - Auto-shutdown is set to $AutoShutdownTime UTC daily" -ForegroundColor Gray
-Write-Host "  - To stop all VMs now: .\teardown-azure-lab.ps1 -StopOnly" -ForegroundColor Gray
-Write-Host "  - To delete everything: .\teardown-azure-lab.ps1 -DeleteAll" -ForegroundColor Gray
+Write-Host "║  NEXT STEPS$(' ' * 55)║" -ForegroundColor Cyan
+
+switch ($Profile) {
+    "Phase1" {
+        Write-Host "║    ssh $($AdminUser)@$PublicIP$(' ' * (53 - $PublicIP.Length))║" -ForegroundColor Cyan
+        Write-Host "║    cd ~/it-stack-installer$(' ' * 41)║" -ForegroundColor Cyan
+        Write-Host "║    # Run Phase 1 Docker Compose labs$(' ' * 31)║" -ForegroundColor Cyan
+        Write-Host "║    bash tests/labs/01-01-standalone.sh$(' ' * 29)║" -ForegroundColor Cyan
+        Write-Host "║    bash tests/labs/02-01-standalone.sh$(' ' * 29)║" -ForegroundColor Cyan
+        Write-Host "║    # Or run all Phase 1 labs at once:$(' ' * 30)║" -ForegroundColor Cyan
+        Write-Host "║    bash scripts/run-phase1-labs.sh$(' ' * 33)║" -ForegroundColor Cyan
+    }
+    "FullStack" {
+        Write-Host "║    ssh $($AdminUser)@$PublicIP$(' ' * (53 - $PublicIP.Length))║" -ForegroundColor Cyan
+        Write-Host "║    cd ~/it-stack-installer$(' ' * 41)║" -ForegroundColor Cyan
+        Write-Host "║    # Run all phases sequentially:$(' ' * 35)║" -ForegroundColor Cyan
+        Write-Host "║    for phase in 1 2 3 4; do$(' ' * 40)║" -ForegroundColor Cyan
+        Write-Host "║      bash scripts/run-phase\${phase}-labs.sh$(' ' * 28)║" -ForegroundColor Cyan
+        Write-Host "║    done$(' ' * 60)║" -ForegroundColor Cyan
+        Write-Host "║    # Full integration test:$(' ' * 41)║" -ForegroundColor Cyan
+        Write-Host "║    bash scripts/test-all-modules.sh$(' ' * 32)║" -ForegroundColor Cyan
+    }
+    "Lab06HA" {
+        Write-Host "║    # From your Ansible control machine:$(' ' * 28)║" -ForegroundColor Cyan
+        Write-Host "║    cd it-stack-ansible$(' ' * 45)║" -ForegroundColor Cyan
+        Write-Host "║    # Update inventory — set $PublicIP for proxy:$(' ' * (19 - $PublicIP.Length))║" -ForegroundColor Cyan
+        Write-Host "║    vim inventory/hosts.ini$(' ' * 41)║" -ForegroundColor Cyan
+        Write-Host "║    make harden          # CIS hardening all 8 nodes$(' ' * 15)║" -ForegroundColor Cyan
+        Write-Host "║    make tls             # Internal CA + per-host certs$(' ' * 13)║" -ForegroundColor Cyan
+        Write-Host "║    make deploy-phase1 && make deploy-phase2$(' ' * 24)║" -ForegroundColor Cyan
+        Write-Host "║    make deploy-phase3 && make deploy-phase4$(' ' * 24)║" -ForegroundColor Cyan
+        Write-Host "║    make backup-setup    # Install backup crons$(' ' * 20)║" -ForegroundColor Cyan
+        Write-Host "║    make smoke-test      # Verify all services up$(' ' * 18)║" -ForegroundColor Cyan
+    }
+}
+
+Write-Host "╠$bar╣" -ForegroundColor Yellow
+Write-Host "║  COST CONTROL$(' ' * 53)║" -ForegroundColor Yellow
+Write-Host "║  Stop VMs (zero compute cost):$(' ' * 36)║" -ForegroundColor Yellow
+Write-Host "║    .\teardown-azure-lab.ps1 -StopOnly -ResourceGroup $ResourceGroup$(' ' * (11 - $ResourceGroup.Length))║" -ForegroundColor Yellow
+Write-Host "║  Start VMs again:$(' ' * 49)║" -ForegroundColor Yellow
+Write-Host "║    .\teardown-azure-lab.ps1 -StartAll -ResourceGroup $ResourceGroup$(' ' * (11 - $ResourceGroup.Length))║" -ForegroundColor YellowWrite-Host "╚$bar╝" -ForegroundColor YellowWrite-Host "║  Delete everything:$(' ' * 47)║" -ForegroundColor Yellow
