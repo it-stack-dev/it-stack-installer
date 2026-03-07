@@ -1,4 +1,4 @@
-<#
+﻿<#
 .SYNOPSIS
     Deploys the IT-Stack lab environment on Azure.
 
@@ -7,20 +7,20 @@
 
       -Profile Phase1
           Standard_D8s_v4  (8 vCPU / 32 GB RAM)    ~$3/day @ 8hrs
-          Single VM · Labs 01-03 · Phase 1 modules (FreeIPA, Keycloak, PostgreSQL, Redis, Traefik)
+          Single VM . Labs 01-03 . Phase 1 modules (FreeIPA, Keycloak, PostgreSQL, Redis, Traefik)
           Ideal for: first-time setup, Azure Student credit, learning Phase 1
 
       -Profile FullStack
           Standard_E16s_v4 (16 vCPU / 128 GB RAM)   ~$8/day @ 8hrs
-          Single VM · All 20 modules · Labs 01-05
+          Single VM . All 20 modules . Labs 01-05
           Ideal for: running all phases end-to-end, integration testing
 
       -Profile Lab06HA
           8-VM cluster mirroring production layout    ~$16/day @ 8hrs
-          Labs 01-06 · Full HA, Ansible, production playbooks
+          Labs 01-06 . Full HA, Ansible, production playbooks
           Ideal for: Lab 06 production deployment, Ansible testing, DR drills
 
-    The script is idempotent — safe to re-run. Existing resources are skipped.
+    The script is idempotent - safe to re-run. Existing resources are skipped.
 
 .PARAMETER Profile
     Phase1 | FullStack | Lab06HA
@@ -30,7 +30,7 @@
     Defaults: rg-it-stack-phase1 | rg-it-stack-fullstack | rg-it-stack-lab06
 
 .PARAMETER Location
-    Azure region (default: eastus — cheapest for student accounts)
+    Azure region (default: eastus - cheapest for student accounts)
 
 .PARAMETER AdminUser
     SSH admin username on all VMs (default: itstack)
@@ -51,13 +51,13 @@
     Print the full deployment plan without creating any Azure resources.
 
 .EXAMPLE
-    # Phase 1 — cheapest, good for learning (Azure Student recommended start)
+    # Phase 1 - cheapest, good for learning (Azure Student recommended start)
     .\deploy-azure-lab.ps1 -Profile Phase1
 
-    # Full stack test — all 20 modules on one big VM
+    # Full stack test - all 20 modules on one big VM
     .\deploy-azure-lab.ps1 -Profile FullStack
 
-    # Lab 06 HA — full 8-VM production replica
+    # Lab 06 HA - full 8-VM production replica
     .\deploy-azure-lab.ps1 -Profile Lab06HA
 
     # Preview what would be created
@@ -73,7 +73,7 @@ param(
     [ValidateSet("Phase1","FullStack","Lab06HA","")]
     [string]$Profile = "",
 
-    # Legacy -Mode alias (SingleVM → Phase1, MultiVM → Lab06HA)
+    # Legacy -Mode alias (SingleVM -> Phase1, MultiVM -> Lab06HA)
     [Parameter(Mandatory=$false)]
     [ValidateSet("SingleVM","MultiVM","")]
     [string]$Mode = "",
@@ -89,11 +89,11 @@ param(
 Set-StrictMode -Version Latest
 $ErrorActionPreference = "Stop"
 
-# ─── Backward-compat: map -Mode to -Profile ───────────────────────────────────
+# --- Backward-compat: map -Mode to -Profile -----------------------------------
 if ($Mode -and -not $Profile) {
     Write-Warning "-Mode is deprecated. Use -Profile Phase1|FullStack|Lab06HA instead."
     $Profile = if ($Mode -eq "SingleVM") { "Phase1" } else { "Lab06HA" }
-    Write-Warning "Mapped -Mode $Mode  →  -Profile $Profile"
+    Write-Warning "Mapped -Mode $Mode  ->  -Profile $Profile"
 }
 if (-not $Profile) {
     Write-Host "Usage: .\deploy-azure-lab.ps1 -Profile <Phase1|FullStack|Lab06HA>" -ForegroundColor Yellow
@@ -104,7 +104,7 @@ if (-not $Profile) {
     throw "Missing required parameter: -Profile"
 }
 
-# ─── Cross-platform SSH key default path ──────────────────────────────────────
+# --- Cross-platform SSH key default path --------------------------------------
 if (-not $SshPublicKeyPath) {
     $SshPublicKeyPath = if ($IsWindows) {
         Join-Path $HOME '.ssh' 'id_rsa.pub'
@@ -113,17 +113,17 @@ if (-not $SshPublicKeyPath) {
     }
 }
 
-# ─── Colour helpers ───────────────────────────────────────────────────────────
-function Write-Step { param($m) Write-Host "`n▶ $m" -ForegroundColor Cyan }
-function Write-OK   { param($m) Write-Host "  ✓ $m" -ForegroundColor Green }
-function Write-Warn { param($m) Write-Host "  ⚠ $m" -ForegroundColor Yellow }
-function Write-Info { param($m) Write-Host "  · $m" -ForegroundColor Gray }
+# --- Colour helpers -----------------------------------------------------------
+function Write-Step { param($m) Write-Host "`n>> $m" -ForegroundColor Cyan }
+function Write-OK   { param($m) Write-Host "  [OK] $m" -ForegroundColor Green }
+function Write-Warn { param($m) Write-Host "  [!] $m" -ForegroundColor Yellow }
+function Write-Info { param($m) Write-Host "  . $m" -ForegroundColor Gray }
 function Write-Dry  { param($m) Write-Host "  [DRY-RUN] $m" -ForegroundColor Magenta }
 
-# ─── Profile definitions ──────────────────────────────────────────────────────
+# --- Profile definitions ------------------------------------------------------
 $Profiles = @{
     Phase1 = @{
-        Description   = "Phase 1 — Foundation (Labs 01-03, Phase 1 modules)"
+        Description   = "Phase 1 - Foundation (Labs 01-03, Phase 1 modules)"
         Mode          = "SingleVM"
         VMSize        = "Standard_D8s_v4"
         OsDiskGB      = 64
@@ -133,7 +133,7 @@ $Profiles = @{
         LabsSupported = "Labs 01-03"
     }
     FullStack = @{
-        Description   = "Full Stack — All 20 modules (Labs 01-05)"
+        Description   = "Full Stack - All 20 modules (Labs 01-05)"
         Mode          = "SingleVM"
         VMSize        = "Standard_E16s_v4"
         OsDiskGB      = 128
@@ -143,7 +143,7 @@ $Profiles = @{
         LabsSupported = "Labs 01-05"
     }
     Lab06HA = @{
-        Description   = "Lab 06 — Production HA (8-VM cluster, all labs)"
+        Description   = "Lab 06 - Production HA (8-VM cluster, all labs)"
         Mode          = "MultiVM"
         VMSize        = ""
         OsDiskGB      = 64
@@ -157,7 +157,7 @@ $Profiles = @{
 $P = $Profiles[$Profile]
 if (-not $ResourceGroup) { $ResourceGroup = $P.RGDefault }
 
-# ─── 8-VM cluster layout (Lab06HA) ────────────────────────────────────────────
+# --- 8-VM cluster layout (Lab06HA) --------------------------------------------
 $MultiVMLayout = @(
     @{ Name="lab-id1";    IP="10.0.50.11"; Size="Standard_D4s_v4";  DiskGB=64;  Role="FreeIPA, Keycloak";                PublicIP=$false }
     @{ Name="lab-db1";    IP="10.0.50.12"; Size="Standard_E8s_v4";  DiskGB=100; Role="PostgreSQL, Redis, Elasticsearch"; PublicIP=$false }
@@ -175,7 +175,7 @@ $NsgName    = "nsg-it-stack-lab"
 $VNetPrefix = "10.0.50.0/24"
 $DnsZone    = "lab.it-stack.local"
 
-# ─── Pre-flight checks ────────────────────────────────────────────────────────
+# --- Pre-flight checks --------------------------------------------------------
 Write-Step "Pre-flight checks"
 
 if (-not (Get-Command az -ErrorAction SilentlyContinue)) {
@@ -185,14 +185,14 @@ Write-OK "Azure CLI: $(az version --query '\"azure-cli\"' -o tsv 2>$null)"
 
 $loginCheck = az account show --query "id" -o tsv 2>$null
 if (-not $loginCheck) {
-    Write-Warn "Not logged in — running az login..."
+    Write-Warn "Not logged in - running az login..."
     az login
 }
 $sub = az account show --query "{name:name,id:id}" -o json | ConvertFrom-Json
 Write-OK "Subscription: $($sub.name) [$($sub.id)]"
 
 if (-not (Test-Path $SshPublicKeyPath)) {
-    Write-Warn "SSH key not found at $SshPublicKeyPath — generating..."
+    Write-Warn "SSH key not found at $SshPublicKeyPath - generating..."
     if (-not $DryRun) {
         # Build key path using the platform path separator
         $keyBase = $SshPublicKeyPath -replace [regex]::Escape('.pub'), ''
@@ -212,12 +212,12 @@ if (-not (Test-Path $SshPublicKeyPath)) {
 $SshPublicKey = if (Test-Path $SshPublicKeyPath) {
     Get-Content $SshPublicKeyPath -Raw
 } else {
-    if (-not $DryRun) { Write-Warn "SSH public key not found — deploy will fail. Generate one first." }
+    if (-not $DryRun) { Write-Warn "SSH public key not found - deploy will fail. Generate one first." }
     "DRY-RUN-KEY"
 }
 Write-OK "SSH key: $SshPublicKeyPath"
 
-# ─── Print plan ───────────────────────────────────────────────────────────────
+# --- Print plan ---------------------------------------------------------------
 Write-Step "Deployment plan"
 Write-Host ""
 Write-Host "  Profile       : $Profile" -ForegroundColor White
@@ -248,7 +248,7 @@ if ($DryRun) {
     return
 }
 
-# ─── Resource Group ───────────────────────────────────────────────────────────
+# --- Resource Group -----------------------------------------------------------
 Write-Step "Resource group: $ResourceGroup"
 $rgExists = az group exists --name $ResourceGroup | ConvertFrom-Json
 if (-not $rgExists) {
@@ -258,7 +258,7 @@ if (-not $rgExists) {
     Write-OK "Already exists"
 }
 
-# ─── NSG ──────────────────────────────────────────────────────────────────────
+# --- NSG ----------------------------------------------------------------------
 Write-Step "Network security group: $NsgName"
 $nsgExists = az network nsg show --resource-group $ResourceGroup --name $NsgName `
     --query "name" -o tsv 2>$null
@@ -289,7 +289,7 @@ if (-not $nsgExists) {
     Write-OK "Already exists"
 }
 
-# ─── VNet + Subnet ────────────────────────────────────────────────────────────
+# --- VNet + Subnet ------------------------------------------------------------
 Write-Step "Virtual network: $VNetName ($VNetPrefix)"
 $vnetExists = az network vnet show --resource-group $ResourceGroup --name $VNetName `
     --query "name" -o tsv 2>$null
@@ -306,7 +306,7 @@ if (-not $vnetExists) {
     Write-OK "Already exists"
 }
 
-# ─── VM creation function ─────────────────────────────────────────────────────
+# --- VM creation function -----------------------------------------------------
 function New-LabVM {
     param(
         [string]$VmName,
@@ -320,11 +320,11 @@ function New-LabVM {
     $exists = az vm show --resource-group $ResourceGroup --name $VmName `
         --query "name" -o tsv 2>$null
     if ($exists) {
-        Write-OK "$VmName — already exists, skipping"
+        Write-OK "$VmName - already exists, skipping"
         return
     }
 
-    Write-Host "  · Creating $VmName ($Size / ${DiskGB}GB) [$Role]..." -NoNewline -ForegroundColor Gray
+    Write-Host "  . Creating $VmName ($Size / ${DiskGB}GB) [$Role]..." -NoNewline -ForegroundColor Gray
 
     # NIC with static private IP
     $nicName = "nic-$VmName"
@@ -385,12 +385,12 @@ echo "" >> /etc/hosts
 echo "127.0.1.1  $VmName" >> /etc/hosts
 # MOTD
 cat > /etc/motd << 'MOTDEOF'
-╔═══════════════════════════════════════════════════════════╗
-║  IT-Stack Lab — $VmName
-║  Role : $Role
-║  Repos: ~/it-stack-ansible   ~/it-stack-installer
-║  Start: cd it-stack-ansible && make help
-╚═══════════════════════════════════════════════════════════╝
++-----------------------------------------------------------+
+|  IT-Stack Lab - $VmName
+|  Role : $Role
+|  Repos: ~/it-stack-ansible   ~/it-stack-installer
+|  Start: cd it-stack-ansible && make help
++-----------------------------------------------------------+
 MOTDEOF
 "@
 
@@ -414,7 +414,7 @@ MOTDEOF
     Write-Host " done." -ForegroundColor Green
 }
 
-# ─── Deploy VMs ───────────────────────────────────────────────────────────────
+# --- Deploy VMs ---------------------------------------------------------------
 Write-Step "Provisioning VMs (Profile: $Profile)"
 
 if ($P.Mode -eq "SingleVM") {
@@ -434,7 +434,7 @@ if ($P.Mode -eq "SingleVM") {
     }
 }
 
-# ─── Private DNS Zone ─────────────────────────────────────────────────────────
+# --- Private DNS Zone ---------------------------------------------------------
 Write-Step "Private DNS zone: $DnsZone"
 $dnsExists = az network private-dns zone show --resource-group $ResourceGroup `
     --name $DnsZone --query "name" -o tsv 2>$null
@@ -482,79 +482,79 @@ if (-not $dnsExists) {
     Write-OK "Already exists"
 }
 
-# ─── Retrieve public IPs ──────────────────────────────────────────────────────
+# --- Retrieve public IPs ------------------------------------------------------
 $pipName  = if ($P.Mode -eq "SingleVM") { "pip-lab-single" }  else { "pip-lab-proxy1" }
 $entryVM  = if ($P.Mode -eq "SingleVM") { "lab-single" }      else { "lab-proxy1" }
 $PublicIP = az network public-ip show --resource-group $ResourceGroup `
     --name $pipName --query "ipAddress" -o tsv 2>$null
 
-# ─── Output summary ───────────────────────────────────────────────────────────
-$bar = "═" * 66
+# --- Output summary -----------------------------------------------------------
+$bar = "-" * 66
 Write-Host ""
-Write-Host "╔$bar╗" -ForegroundColor Green
-Write-Host "║  IT-Stack Lab — Profile: $($Profile.PadRight(42))║" -ForegroundColor Green
-Write-Host "╠$bar╣" -ForegroundColor Green
-Write-Host "║  Public IP    : $($PublicIP.PadRight(51))║" -ForegroundColor Green
-Write-Host "║  SSH access   : ssh $($AdminUser)@$($PublicIP.PadRight(47))║" -ForegroundColor Green
-Write-Host "║  Cost est.    : $($P.DailyEst.PadRight(51))║" -ForegroundColor Green
-Write-Host "║  Labs covered : $($P.LabsSupported.PadRight(51))║" -ForegroundColor Green
+Write-Host "+$bar+" -ForegroundColor Green
+Write-Host "|  IT-Stack Lab - Profile: $($Profile.PadRight(42))|" -ForegroundColor Green
+Write-Host "+$bar+" -ForegroundColor Green
+Write-Host "|  Public IP    : $($PublicIP.PadRight(51))|" -ForegroundColor Green
+Write-Host "|  SSH access   : ssh $($AdminUser)@$($PublicIP.PadRight(47))|" -ForegroundColor Green
+Write-Host "|  Cost est.    : $($P.DailyEst.PadRight(51))|" -ForegroundColor Green
+Write-Host "|  Labs covered : $($P.LabsSupported.PadRight(51))|" -ForegroundColor Green
 if ($AutoShutdownTime) {
-Write-Host "║  Auto-shutdown: $($AutoShutdownTime) UTC daily$(' ' * 43)║" -ForegroundColor Green
+Write-Host "|  Auto-shutdown: $($AutoShutdownTime) UTC daily$(' ' * 43)|" -ForegroundColor Green
 }
-Write-Host "╠$bar╣" -ForegroundColor Green
+Write-Host "+$bar+" -ForegroundColor Green
 
 if ($P.Mode -eq "MultiVM") {
-    Write-Host "║  8-VM Cluster$(' ' * 53)║" -ForegroundColor Green
+    Write-Host "|  8-VM Cluster$(' ' * 53)|" -ForegroundColor Green
     foreach ($vm in $MultiVMLayout) {
         $pip = if ($vm.PublicIP) { " ← entry point" } else { "" }
-        Write-Host "║    $($vm.Name.PadRight(12)) $($vm.IP)  $($vm.Role.PadRight(32))$pip  ║" -ForegroundColor Green
+        Write-Host "|    $($vm.Name.PadRight(12)) $($vm.IP)  $($vm.Role.PadRight(32))$pip  |" -ForegroundColor Green
     }
-    Write-Host "╠$bar╣" -ForegroundColor Green
-    Write-Host "║  Jump to other servers:$(' ' * 43)║" -ForegroundColor Green
-    Write-Host "║    ssh -J $($AdminUser)@$PublicIP $($AdminUser)@10.0.50.11   (lab-id1)$(' ' * 10)║" -ForegroundColor Green
-    Write-Host "║    ssh -J $($AdminUser)@$PublicIP $($AdminUser)@10.0.50.12   (lab-db1)$(' ' * 10)║" -ForegroundColor Green
-    Write-Host "╠$bar╣" -ForegroundColor Green
+    Write-Host "+$bar+" -ForegroundColor Green
+    Write-Host "|  Jump to other servers:$(' ' * 43)|" -ForegroundColor Green
+    Write-Host "|    ssh -J $($AdminUser)@$PublicIP $($AdminUser)@10.0.50.11   (lab-id1)$(' ' * 10)|" -ForegroundColor Green
+    Write-Host "|    ssh -J $($AdminUser)@$PublicIP $($AdminUser)@10.0.50.12   (lab-db1)$(' ' * 10)|" -ForegroundColor Green
+    Write-Host "+$bar+" -ForegroundColor Green
 }
 
-Write-Host "║  NEXT STEPS$(' ' * 55)║" -ForegroundColor Cyan
+Write-Host "|  NEXT STEPS$(' ' * 55)|" -ForegroundColor Cyan
 
 switch ($Profile) {
     "Phase1" {
-        Write-Host "║    ssh $($AdminUser)@$PublicIP$(' ' * (53 - $PublicIP.Length))║" -ForegroundColor Cyan
-        Write-Host "║    cd ~/it-stack-installer$(' ' * 41)║" -ForegroundColor Cyan
-        Write-Host "║    # Run Phase 1 Docker Compose labs$(' ' * 31)║" -ForegroundColor Cyan
-        Write-Host "║    bash tests/labs/01-01-standalone.sh$(' ' * 29)║" -ForegroundColor Cyan
-        Write-Host "║    bash tests/labs/02-01-standalone.sh$(' ' * 29)║" -ForegroundColor Cyan
-        Write-Host "║    # Or run all Phase 1 labs at once:$(' ' * 30)║" -ForegroundColor Cyan
-        Write-Host "║    bash scripts/run-phase1-labs.sh$(' ' * 33)║" -ForegroundColor Cyan
+        Write-Host "|    ssh $($AdminUser)@$PublicIP$(' ' * (53 - $PublicIP.Length))|" -ForegroundColor Cyan
+        Write-Host "|    cd ~/it-stack-installer$(' ' * 41)|" -ForegroundColor Cyan
+        Write-Host "|    # Run Phase 1 Docker Compose labs$(' ' * 31)|" -ForegroundColor Cyan
+        Write-Host "|    bash tests/labs/01-01-standalone.sh$(' ' * 29)|" -ForegroundColor Cyan
+        Write-Host "|    bash tests/labs/02-01-standalone.sh$(' ' * 29)|" -ForegroundColor Cyan
+        Write-Host "|    # Or run all Phase 1 labs at once:$(' ' * 30)|" -ForegroundColor Cyan
+        Write-Host "|    bash scripts/run-phase1-labs.sh$(' ' * 33)|" -ForegroundColor Cyan
     }
     "FullStack" {
-        Write-Host "║    ssh $($AdminUser)@$PublicIP$(' ' * (53 - $PublicIP.Length))║" -ForegroundColor Cyan
-        Write-Host "║    cd ~/it-stack-installer$(' ' * 41)║" -ForegroundColor Cyan
-        Write-Host "║    # Run all phases sequentially:$(' ' * 35)║" -ForegroundColor Cyan
-        Write-Host "║    for phase in 1 2 3 4; do$(' ' * 40)║" -ForegroundColor Cyan
-        Write-Host "║      bash scripts/run-phase\${phase}-labs.sh$(' ' * 28)║" -ForegroundColor Cyan
-        Write-Host "║    done$(' ' * 60)║" -ForegroundColor Cyan
-        Write-Host "║    # Full integration test:$(' ' * 41)║" -ForegroundColor Cyan
-        Write-Host "║    bash scripts/test-all-modules.sh$(' ' * 32)║" -ForegroundColor Cyan
+        Write-Host "|    ssh $($AdminUser)@$PublicIP$(' ' * (53 - $PublicIP.Length))|" -ForegroundColor Cyan
+        Write-Host "|    cd ~/it-stack-installer$(' ' * 41)|" -ForegroundColor Cyan
+        Write-Host "|    # Run all phases sequentially:$(' ' * 35)|" -ForegroundColor Cyan
+        Write-Host "|    for phase in 1 2 3 4; do$(' ' * 40)|" -ForegroundColor Cyan
+        Write-Host "|      bash scripts/run-phase\${phase}-labs.sh$(' ' * 28)|" -ForegroundColor Cyan
+        Write-Host "|    done$(' ' * 60)|" -ForegroundColor Cyan
+        Write-Host "|    # Full integration test:$(' ' * 41)|" -ForegroundColor Cyan
+        Write-Host "|    bash scripts/test-all-modules.sh$(' ' * 32)|" -ForegroundColor Cyan
     }
     "Lab06HA" {
-        Write-Host "║    # From your Ansible control machine:$(' ' * 28)║" -ForegroundColor Cyan
-        Write-Host "║    cd it-stack-ansible$(' ' * 45)║" -ForegroundColor Cyan
-        Write-Host "║    # Update inventory — set $PublicIP for proxy:$(' ' * (19 - $PublicIP.Length))║" -ForegroundColor Cyan
-        Write-Host "║    vim inventory/hosts.ini$(' ' * 41)║" -ForegroundColor Cyan
-        Write-Host "║    make harden          # CIS hardening all 8 nodes$(' ' * 15)║" -ForegroundColor Cyan
-        Write-Host "║    make tls             # Internal CA + per-host certs$(' ' * 13)║" -ForegroundColor Cyan
-        Write-Host "║    make deploy-phase1 && make deploy-phase2$(' ' * 24)║" -ForegroundColor Cyan
-        Write-Host "║    make deploy-phase3 && make deploy-phase4$(' ' * 24)║" -ForegroundColor Cyan
-        Write-Host "║    make backup-setup    # Install backup crons$(' ' * 20)║" -ForegroundColor Cyan
-        Write-Host "║    make smoke-test      # Verify all services up$(' ' * 18)║" -ForegroundColor Cyan
+        Write-Host "|    # From your Ansible control machine:$(' ' * 28)|" -ForegroundColor Cyan
+        Write-Host "|    cd it-stack-ansible$(' ' * 45)|" -ForegroundColor Cyan
+        Write-Host "|    # Update inventory - set $PublicIP for proxy:$(' ' * (19 - $PublicIP.Length))|" -ForegroundColor Cyan
+        Write-Host "|    vim inventory/hosts.ini$(' ' * 41)|" -ForegroundColor Cyan
+        Write-Host "|    make harden          # CIS hardening all 8 nodes$(' ' * 15)|" -ForegroundColor Cyan
+        Write-Host "|    make tls             # Internal CA + per-host certs$(' ' * 13)|" -ForegroundColor Cyan
+        Write-Host "|    make deploy-phase1 && make deploy-phase2$(' ' * 24)|" -ForegroundColor Cyan
+        Write-Host "|    make deploy-phase3 && make deploy-phase4$(' ' * 24)|" -ForegroundColor Cyan
+        Write-Host "|    make backup-setup    # Install backup crons$(' ' * 20)|" -ForegroundColor Cyan
+        Write-Host "|    make smoke-test      # Verify all services up$(' ' * 18)|" -ForegroundColor Cyan
     }
 }
 
-Write-Host "╠$bar╣" -ForegroundColor Yellow
-Write-Host "║  COST CONTROL$(' ' * 53)║" -ForegroundColor Yellow
-Write-Host "║  Stop VMs (zero compute cost):$(' ' * 36)║" -ForegroundColor Yellow
-Write-Host "║    .\teardown-azure-lab.ps1 -StopOnly -ResourceGroup $ResourceGroup$(' ' * (11 - $ResourceGroup.Length))║" -ForegroundColor Yellow
-Write-Host "║  Start VMs again:$(' ' * 49)║" -ForegroundColor Yellow
-Write-Host "║    .\teardown-azure-lab.ps1 -StartAll -ResourceGroup $ResourceGroup$(' ' * (11 - $ResourceGroup.Length))║" -ForegroundColor YellowWrite-Host "╚$bar╝" -ForegroundColor YellowWrite-Host "║  Delete everything:$(' ' * 47)║" -ForegroundColor Yellow
+Write-Host "+$bar+" -ForegroundColor Yellow
+Write-Host "|  COST CONTROL$(' ' * 53)|" -ForegroundColor Yellow
+Write-Host "|  Stop VMs (zero compute cost):$(' ' * 36)|" -ForegroundColor Yellow
+Write-Host "|    .\teardown-azure-lab.ps1 -StopOnly -ResourceGroup $ResourceGroup$(' ' * (11 - $ResourceGroup.Length))|" -ForegroundColor Yellow
+Write-Host "|  Start VMs again:$(' ' * 49)|" -ForegroundColor Yellow
+Write-Host "|    .\teardown-azure-lab.ps1 -StartAll -ResourceGroup $ResourceGroup$(' ' * (11 - $ResourceGroup.Length))|" -ForegroundColor YellowWrite-Host "+$bar+" -ForegroundColor YellowWrite-Host "|  Delete everything:$(' ' * 47)|" -ForegroundColor Yellow
