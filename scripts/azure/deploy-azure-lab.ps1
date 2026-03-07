@@ -416,7 +416,8 @@ MOTDEOF
     if ($AddPublicIp) {
         az network public-ip create `
             --resource-group $ResourceGroup --name "pip-$VmName" `
-            --sku Basic --allocation-method Static --output none 2>$null
+            --sku Standard --allocation-method Static --output none
+        if ($LASTEXITCODE -ne 0) { Write-Warn "Could not create public IP pip-$VmName" }
         az network nic ip-config update `
             --resource-group $ResourceGroup --nic-name $nicName `
             --name ipconfig1 --public-ip-address "pip-$VmName" --output none
@@ -498,6 +499,7 @@ $pipName  = if ($P.Mode -eq "SingleVM") { "pip-lab-single" }  else { "pip-lab-pr
 $entryVM  = if ($P.Mode -eq "SingleVM") { "lab-single" }      else { "lab-proxy1" }
 $PublicIP = az network public-ip show --resource-group $ResourceGroup `
     --name $pipName --query "ipAddress" -o tsv 2>$null
+if (-not $PublicIP) { $PublicIP = "NOT ASSIGNED - run: az network public-ip list -g $ResourceGroup -o table" }
 
 # --- Output summary -----------------------------------------------------------
 $bar = "-" * 66
