@@ -30,7 +30,7 @@
     Defaults: rg-it-stack-phase1 | rg-it-stack-fullstack | rg-it-stack-lab06
 
 .PARAMETER Location
-    Azure region (default: eastus - cheapest for student accounts)
+    Azure region (default: westus2 - compatible with Azure for Students policy)
 
 .PARAMETER AdminUser
     SSH admin username on all VMs (default: itstack)
@@ -79,7 +79,7 @@ param(
     [string]$Mode = "",
 
     [string]$ResourceGroup    = "",
-    [string]$Location         = "eastus",
+    [string]$Location         = "westus2",
     [string]$AdminUser        = "itstack",
     [string]$SshPublicKeyPath = "",
     [string]$AutoShutdownTime = "2200",
@@ -258,6 +258,7 @@ Write-Step "Resource group: $ResourceGroup"
 $rgExists = az group exists --name $ResourceGroup | ConvertFrom-Json
 if (-not $rgExists) {
     az group create --name $ResourceGroup --location $Location --output none
+    if ($LASTEXITCODE -ne 0) { throw "[ERROR] Failed to create resource group '$ResourceGroup' in '$Location'" }
     Write-OK "Created"
 } else {
     Write-OK "Already exists"
@@ -270,6 +271,7 @@ $nsgExists = az network nsg show --resource-group $ResourceGroup --name $NsgName
 if (-not $nsgExists) {
     az network nsg create --resource-group $ResourceGroup --name $NsgName `
         --location $Location --output none
+    if ($LASTEXITCODE -ne 0) { throw "[ERROR] Failed to create NSG '$NsgName' - region '$Location' may be restricted for this subscription" }
 
     $nsgRules = @(
         @{ Name="Allow-SSH";           Priority=100; Ports=@("22");                                              Desc="SSH access" }
@@ -303,6 +305,7 @@ if (-not $vnetExists) {
         --resource-group $ResourceGroup --name $VNetName --location $Location `
         --address-prefix $VNetPrefix --subnet-name $SubnetName --subnet-prefix $VNetPrefix `
         --output none
+    if ($LASTEXITCODE -ne 0) { throw "[ERROR] Failed to create VNet '$VNetName'" }
     az network vnet subnet update `
         --resource-group $ResourceGroup --vnet-name $VNetName --name $SubnetName `
         --network-security-group $NsgName --output none
@@ -339,6 +342,7 @@ function New-LabVM {
         --private-ip-address $PrivateIp `
         --network-security-group $NsgName `
         --output none
+    if ($LASTEXITCODE -ne 0) { throw "[ERROR] Failed to create NIC '$nicName' for '$VmName'" }
 
     # VM (no-wait for parallel provisioning)
     az vm create `
@@ -350,9 +354,11 @@ function New-LabVM {
         --os-disk-size-gb $DiskGB `
         --storage-sku Premium_LRS `
         --no-wait --output none
+    if ($LASTEXITCODE -ne 0) { throw "[ERROR] Failed to submit VM create for '$VmName' (size $Size may be unavailable in '$Location')" }
 
     # Wait for provisioning to finish
     az vm wait --resource-group $ResourceGroup --name $VmName --created --output none
+    if ($LASTEXITCODE -ne 0) { throw "[ERROR] VM '$VmName' failed to reach running state" }
 
     # Auto-shutdown
     if ($AutoShutdownTime) {
