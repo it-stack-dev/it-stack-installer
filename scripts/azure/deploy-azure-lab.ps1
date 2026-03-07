@@ -6,9 +6,9 @@
     Three lab profiles matching the recommended deployment progression:
 
       -Profile Phase1
-          Standard_D8s_v4  (8 vCPU / 32 GB RAM)    ~$3/day @ 8hrs
+          Standard_D4s_v4  (4 vCPU / 16 GB RAM)    ~$2/day @ 8hrs
           Single VM . Labs 01-03 . Phase 1 modules (FreeIPA, Keycloak, PostgreSQL, Redis, Traefik)
-          Ideal for: first-time setup, Azure Student credit, learning Phase 1
+          Ideal for: first-time setup, Azure Student credit (4 vCPU within 6-vCPU quota), learning Phase 1
 
       -Profile FullStack
           Standard_E16s_v4 (16 vCPU / 128 GB RAM)   ~$8/day @ 8hrs
@@ -98,7 +98,7 @@ if ($Mode -and -not $Profile) {
 if (-not $Profile) {
     Write-Host "Usage: .\deploy-azure-lab.ps1 -Profile <Phase1|FullStack|Lab06HA>" -ForegroundColor Yellow
     Write-Host ""
-    Write-Host "  -Profile Phase1    Standard_D8s_v4 single VM  ~`$3/day   Labs 01-03" -ForegroundColor Cyan
+    Write-Host "  -Profile Phase1    Standard_D4s_v4 single VM  ~`$2/day   Labs 01-03 (Azure Student: 4 vCPU within 6-core quota)" -ForegroundColor Cyan
     Write-Host "  -Profile FullStack  Standard_E16s_v4 single VM ~`$8/day   Labs 01-05" -ForegroundColor Cyan
     Write-Host "  -Profile Lab06HA    8-VM cluster               ~`$16/day  Labs 01-06" -ForegroundColor Cyan
     throw "Missing required parameter: -Profile"
@@ -126,9 +126,9 @@ $Profiles = @{
     Phase1 = @{
         Description   = "Phase 1 - Foundation (Labs 01-03, Phase 1 modules)"
         Mode          = "SingleVM"
-        VMSize        = "Standard_D8s_v4"
+        VMSize        = "Standard_D4s_v4"
         OsDiskGB      = 64
-        DailyEst      = '~$3/day @ 8hrs'
+        DailyEst      = '~$2/day @ 8hrs'
         RGDefault     = "rg-it-stack-phase1"
         Modules       = @("freeipa","keycloak","postgresql","redis","traefik")
         LabsSupported = "Labs 01-03"
