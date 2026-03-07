@@ -179,18 +179,22 @@ $DnsZone    = "lab.it-stack.local"
 # --- Pre-flight checks --------------------------------------------------------
 Write-Step "Pre-flight checks"
 
-if (-not (Get-Command az -ErrorAction SilentlyContinue)) {
-    throw "Azure CLI not found. Install: https://aka.ms/installazurecliwindows"
-}
-Write-OK "Azure CLI: $(az version --query '\"azure-cli\"' -o tsv 2>$null)"
+if ($DryRun) {
+    Write-Info "DryRun mode - skipping Azure CLI and login checks"
+} else {
+    if (-not (Get-Command az -ErrorAction SilentlyContinue)) {
+        throw "Azure CLI not found. Install: https://aka.ms/installazurecliwindows"
+    }
+    Write-OK "Azure CLI: $(az version --query '\"azure-cli\"' -o tsv 2>$null)"
 
-$loginCheck = az account show --query "id" -o tsv 2>$null
-if (-not $loginCheck) {
-    Write-Warn "Not logged in - running az login..."
-    az login
+    $loginCheck = az account show --query "id" -o tsv 2>$null
+    if (-not $loginCheck) {
+        Write-Warn "Not logged in - running az login..."
+        az login
+    }
+    $sub = az account show --query "{name:name,id:id}" -o json | ConvertFrom-Json
+    Write-OK "Subscription: $($sub.name) [$($sub.id)]"
 }
-$sub = az account show --query "{name:name,id:id}" -o json | ConvertFrom-Json
-Write-OK "Subscription: $($sub.name) [$($sub.id)]"
 
 if (-not (Test-Path $SshPublicKeyPath)) {
     Write-Warn "SSH key not found at $SshPublicKeyPath - generating..."
