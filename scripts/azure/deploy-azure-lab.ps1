@@ -344,7 +344,7 @@ function New-LabVM {
         --output none
     if ($LASTEXITCODE -ne 0) { throw "[ERROR] Failed to create NIC '$nicName' for '$VmName'" }
 
-    # VM (no-wait for parallel provisioning)
+    # VM (blocking create - wait for provisioning to complete)
     az vm create `
         --resource-group $ResourceGroup --name $VmName --location $Location `
         --size $Size --nics $nicName `
@@ -353,7 +353,7 @@ function New-LabVM {
         --ssh-key-values $SshPublicKey `
         --os-disk-size-gb $DiskGB `
         --storage-sku Premium_LRS `
-        --no-wait --output none
+        --output none
     if ($LASTEXITCODE -ne 0) { throw "[ERROR] Failed to submit VM create for '$VmName' (size $Size may be unavailable in '$Location')" }
 
     # Wait for provisioning to finish
