@@ -282,7 +282,7 @@ if (-not $nsgExists) {
         @{ Name="Allow-VoIP";          Priority=600; Ports=@("5060","5061");                                     Desc="SIP/VoIP (FreePBX)" }
     )
     foreach ($r in $nsgRules) {
-        $src = if ($r.Source) { $r.Source } else { "*" }
+        $src = if ($r['Source']) { $r['Source'] } else { "*" }
         az network nsg rule create `
             --resource-group $ResourceGroup --nsg-name $NsgName `
             --name $r.Name --priority $r.Priority --direction Inbound --access Allow `
